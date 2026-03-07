@@ -1,0 +1,14 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Ansible
+*.retry
+
+# EE build artifacts
+context/
+
+# Secrets
+.env
+vault_pass.txt

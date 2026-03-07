@@ -1,0 +1,80 @@
+---
+- name: Check AKS version of multiple AKS clusters
+  hosts: localhost
+  gather_facts: false
+  vars:
+    resource_groups:
+      - "rg-aks-prod"
+      - "rg-aks-dev"
+    cluster_names:
+      - "aks-cluster-prod"
+      - "aks-cluster-dev"
+    subscription_id: "{{ azure_subscription_id | default('') }}"
+
+  tasks:
+    - name: Get AKS cluster information
+      block:
+        - name: Retrieve AKS cluster details
+          azure.azcollection.azure_rm_aks_info:
+            resource_group: "{{ item.0 }}"
+            name: "{{ item.1 }}"
+            subscription_id: "{{ subscription_id | default(omit) }}"
+          register: aks_cluster_info
+          loop: "{{ resource_groups | zip(cluster_names) | list }}"
+          tags:
+            - aks_info
+            - version_check
+
+        - name: Display AKS cluster versions
+          ansible.builtin.debug:
+            msg: |
+              Cluster: {{ item.aks[0].name }}
+              Resource Group: {{ item.aks[0].resource_group }}
+              Kubernetes Version: {{ item.aks[0].kubernetes_version }}
+              Node Pool Versions:
+              {% for pool in item.aks[0].agent_pool_profiles %}
+                - {{ pool.name }}: {{ pool.orchestrator_version }}
+              {% endfor %}
+          loop: "{{ aks_cluster_info.results }}"
+          when: item.aks is defined and item.aks | length > 0
+          tags:
+            - display_versions
+            - version_check
+
+        - name: Create version summary
+          ansible.builtin.set_fact:
+            aks_version_summary: "{{ aks_version_summary | default([]) + [cluster_summary] }}"
+          vars:
+            cluster_summary:
+              cluster_name: "{{ item.aks[0].name }}"
+              resource_group: "{{ item.aks[0].resource_group }}"
+              kubernetes_version: "{{ item.aks[0].kubernetes_version }}"
+              agent_pools: "{{ item.aks[0].agent_pool_profiles | map(attribute='orchestrator_version') | list | unique }}"
+          loop: "{{ aks_cluster_info.results }}"
+          when: item.aks is defined and item.aks | length > 0
+          tags:
+            - version_summary
+            - version_check
+
+        - name: Display consolidated version summary
+          ansible.builtin.debug:
+            var: aks_version_summary
+          tags:
+            - final_summary
+            - version_check
+
+      rescue:
+        - name: Handle AKS cluster retrieval failure
+          ansible.builtin.debug:
+            msg: "Failed to retrieve AKS cluster information: {{ ansible_failed_result.msg }}"
+          tags:
+            - error_handling
+            - version_check
+
+      always:
+        - name: Cleanup temporary variables
+          ansible.builtin.set_fact:
+            aks_cluster_info: null
+          tags:
+            - cleanup
+            - version_check
